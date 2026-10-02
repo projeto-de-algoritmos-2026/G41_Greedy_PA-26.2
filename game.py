@@ -103,3 +103,23 @@ class Game:
             self.clock.tick(60)
 
         pygame.quit()
+
+class Game:
+    def __init__(self, headless: bool = False):
+        self.headless = headless
+        if self.headless:
+            os.environ["SDL_VIDEODRIVER"] = "dummy"
+
+        pygame.init()
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("Laboratório de Loot")
+
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont(None, 22)
+        self.big_font = pygame.font.SysFont(None, 32)
+
+        self.player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
+
+    def update(self, dt):
+        keys = pygame.key.get_pressed()
+        self.player.update(dt, keys)
