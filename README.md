@@ -47,4 +47,4 @@ Os itens abaixo já estão definidos na base visual do jogo:
 
 ## A estrutura da mochila
 
-A mochila possui capacidade máxima de 32 kg e uma barra visual para indicar o peso atual carregado.
+A mochila possui capacidade máxima de 7 kg e uma barra visual para indicar o peso atual carregado. Como os itens disponíveis somam 13,4 kg, o jogador precisa priorizar o que coletar.

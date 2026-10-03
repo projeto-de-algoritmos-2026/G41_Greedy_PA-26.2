@@ -1,5 +1,6 @@
 import argparse
 import os
+from collections import Counter
 from dataclasses import dataclass
 
 import pygame
@@ -9,7 +10,7 @@ SCREEN_WIDTH = 960
 SCREEN_HEIGHT = 640
 ROOM_WIDTH = 760
 ROOM_HEIGHT = 480
-BACKPACK_CAPACITY = 32.0
+BACKPACK_CAPACITY = 7.0
 PLAYER_SPEED = 220
 
 
@@ -140,14 +141,19 @@ class BackpackUI:
         self.capacity = capacity
         self.current_weight = 0.0
         self.total_value = 0
-        self.collected_items: list[str] = []
+        self.inventory: list[Item] = []
+
+    @property
+    def collected_items(self) -> list[str]:
+        return [item.name for item in self.inventory]
 
     def add_item(self, item: Item) -> bool:
-        if self.current_weight + item.weight > self.capacity:
+        if item.collected or item in self.inventory or self.current_weight + item.weight > self.capacity:
             return False
+        self.inventory.append(item)
         self.current_weight += item.weight
         self.total_value += item.value
-        self.collected_items.append(item.name)
+        item.collected = True
         return True
 
     def percent(self) -> float:
@@ -160,26 +166,32 @@ class BackpackUI:
         pygame.draw.rect(surface, (60, 60, 70), (self.x, self.y, self.width, self.height), 2, border_radius=10)
 
         bar_x = self.x + 18
-        bar_y = self.y + 42
+        bar_y = self.y + 35
         bar_w = self.width - 36
-        bar_h = 24
+        bar_h = 18
 
         pygame.draw.rect(surface, (35, 42, 55), (bar_x, bar_y, bar_w, bar_h), border_radius=12)
         fill = max(0.0, min(self.percent(), 1.0))
         pygame.draw.rect(surface, (80, 220, 120), (bar_x, bar_y, bar_w * fill, bar_h), border_radius=12)
 
         title = font.render("MOCHILA", True, (255, 255, 255))
-        surface.blit(title, (self.x + 18, self.y + 10))
+        surface.blit(title, (self.x + 18, self.y + 8))
 
         info = font.render(f"{self.current_weight:.1f}/{self.capacity:.1f} kg", True, (235, 235, 235))
-        surface.blit(info, (self.x + 18, self.y + 76))
+        surface.blit(info, (self.x + 18, self.y + 58))
 
         value_text = font.render(f"Valor total: {self.total_value} pts", True, (255, 214, 102))
-        surface.blit(value_text, (self.x + 18, self.y + 106))
+        surface.blit(value_text, (self.x + 18, self.y + 80))
 
-        if self.collected_items:
-            item_list = font.render("Coletado: " + ", ".join(self.collected_items[:3]), True, (180, 220, 255))
-            surface.blit(item_list, (self.x + 18, self.y + 132))
+        inventory_title = font.render("ITENS", True, (180, 220, 255))
+        surface.blit(inventory_title, (self.x + 18, self.y + 103))
+        item_counts = Counter(item.name for item in self.inventory)
+        inventory_rows = [f"{name} x{count}" for name, count in item_counts.items()]
+        if not inventory_rows:
+            inventory_rows = ["(vazio)"]
+        for index, row in enumerate(inventory_rows):
+            item_text = font.render(row, True, (220, 230, 240))
+            surface.blit(item_text, (self.x + 18, self.y + 122 + index * 18))
 
 
 class Game:
@@ -197,7 +209,7 @@ class Game:
         self.big_font = pygame.font.SysFont(None, 32)
 
         self.player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
-        self.backpack = BackpackUI(620, 470, 290, 150, BACKPACK_CAPACITY)
+        self.backpack = BackpackUI(620, 450, 290, 190, BACKPACK_CAPACITY)
         self.items = [
             Item(name="Soro Curativo", x=150, y=120, weight=1.5, value=18, total_available=8, color=(80, 200, 130)),
             Item(name="Pólvora", x=265, y=170, weight=2.0, value=32, total_available=6, color=(255, 180, 80)),
@@ -243,7 +255,6 @@ class Game:
 
         if isinstance(target, Item):
             if self.backpack.add_item(target):
-                target.collected = True
                 self.interaction_message = f"{target.name} coletado."
             else:
                 self.interaction_message = "Mochila sem capacidade suficiente."
