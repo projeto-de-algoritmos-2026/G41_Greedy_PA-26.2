@@ -11,6 +11,7 @@ SCREEN_HEIGHT = 640
 ROOM_WIDTH = 760
 ROOM_HEIGHT = 480
 BACKPACK_CAPACITY = 7.0
+VICTORY_SCORE = 100
 PLAYER_SPEED = 220
 
 
@@ -26,7 +27,7 @@ class Item:
     radius: int = 14
     collected: bool = False
 
-    def draw(self, surface, font):
+    def draw(self, surface, font, goal_value: int = VICTORY_SCORE):
         if self.collected:
             return
 
@@ -161,14 +162,14 @@ class BackpackUI:
             return 0.0
         return min(self.current_weight / self.capacity, 1.0)
 
-    def draw(self, surface, font):
+    def draw(self, surface, font, goal_value: int = VICTORY_SCORE):
         pygame.draw.rect(surface, (22, 24, 31), (self.x, self.y, self.width, self.height), border_radius=10)
         pygame.draw.rect(surface, (60, 60, 70), (self.x, self.y, self.width, self.height), 2, border_radius=10)
 
         bar_x = self.x + 18
         bar_y = self.y + 35
         bar_w = self.width - 36
-        bar_h = 18
+        bar_h = 14
 
         pygame.draw.rect(surface, (35, 42, 55), (bar_x, bar_y, bar_w, bar_h), border_radius=12)
         fill = max(0.0, min(self.percent(), 1.0))
@@ -177,21 +178,30 @@ class BackpackUI:
         title = font.render("MOCHILA", True, (255, 255, 255))
         surface.blit(title, (self.x + 18, self.y + 8))
 
-        info = font.render(f"{self.current_weight:.1f}/{self.capacity:.1f} kg", True, (235, 235, 235))
-        surface.blit(info, (self.x + 18, self.y + 58))
+        info = font.render(f"Peso: {self.current_weight:.1f}/{self.capacity:.1f} kg", True, (235, 235, 235))
+        surface.blit(info, (self.x + 18, self.y + 52))
 
-        value_text = font.render(f"Valor total: {self.total_value} pts", True, (255, 214, 102))
-        surface.blit(value_text, (self.x + 18, self.y + 80))
+        score_bar_y = self.y + 74
+        score_percent = min(self.total_value / goal_value, 1.0) if goal_value > 0 else 0.0
+        pygame.draw.rect(surface, (35, 42, 55), (bar_x, score_bar_y, bar_w, 12), border_radius=6)
+        pygame.draw.rect(
+            surface,
+            (255, 190, 75),
+            (bar_x, score_bar_y, bar_w * score_percent, 12),
+            border_radius=6,
+        )
+        score_text = font.render(f"Pontos: {self.total_value}/{goal_value} pts", True, (255, 214, 102))
+        surface.blit(score_text, (self.x + 18, self.y + 90))
 
         inventory_title = font.render("ITENS", True, (180, 220, 255))
-        surface.blit(inventory_title, (self.x + 18, self.y + 103))
+        surface.blit(inventory_title, (self.x + 18, self.y + 112))
         item_counts = Counter(item.name for item in self.inventory)
         inventory_rows = [f"{name} x{count}" for name, count in item_counts.items()]
         if not inventory_rows:
             inventory_rows = ["(vazio)"]
         for index, row in enumerate(inventory_rows):
             item_text = font.render(row, True, (220, 230, 240))
-            surface.blit(item_text, (self.x + 18, self.y + 122 + index * 18))
+            surface.blit(item_text, (self.x + 18, self.y + 130 + index * 16))
 
 
 class Game:
@@ -224,13 +234,14 @@ class Game:
             pygame.Rect(340, 90, 120, 160),
             pygame.Rect(560, 95, 120, 170),
         ]
+        self.game_state = "playing"
         self.interaction_message = ""
 
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_e:
+            if self.game_state == "playing" and event.type == pygame.KEYDOWN and event.key == pygame.K_e:
                 self.interact()
         return True
 
@@ -248,6 +259,9 @@ class Game:
         )
 
     def interact(self):
+        if self.game_state != "playing":
+            return
+
         target = self.nearest_interactable()
         if target is None:
             self.interaction_message = "Nada para interagir por perto."
@@ -255,7 +269,9 @@ class Game:
 
         if isinstance(target, Item):
             if self.backpack.add_item(target):
-                self.interaction_message = f"{target.name} coletado."
+                self.update_game_state()
+                if self.game_state == "playing":
+                    self.interaction_message = f"{target.name} coletado."
             else:
                 self.interaction_message = "Mochila sem capacidade suficiente."
             return
@@ -263,7 +279,36 @@ class Game:
         target.interact(self.player, self.backpack)
         self.interaction_message = "Porta aberta." if target.open else "Porta fechada."
 
+    def best_possible_score(self):
+        remaining_capacity = self.backpack.capacity - self.backpack.current_weight
+        possible_scores = {0.0: 0}
+
+        for item in self.items:
+            if item.collected:
+                continue
+            updated_scores = possible_scores.copy()
+            for weight, score in possible_scores.items():
+                combined_weight = round(weight + item.weight, 4)
+                if combined_weight <= remaining_capacity:
+                    updated_scores[combined_weight] = max(
+                        updated_scores.get(combined_weight, 0),
+                        score + item.value,
+                    )
+            possible_scores = updated_scores
+
+        return self.backpack.total_value + max(possible_scores.values(), default=0)
+
+    def update_game_state(self):
+        if self.backpack.total_value >= VICTORY_SCORE:
+            self.game_state = "won"
+            self.interaction_message = "Meta alcançada! Você venceu."
+        elif self.best_possible_score() < VICTORY_SCORE:
+            self.game_state = "lost"
+            self.interaction_message = "Não há combinações suficientes. Você perdeu."
+
     def update(self, dt):
+        if self.game_state != "playing":
+            return
         keys = pygame.key.get_pressed()
         solid_obstacles = self.obstacles + self.doors
         self.player.update(dt, keys, solid_obstacles)
@@ -294,7 +339,7 @@ class Game:
             door.draw(self.screen, self.font)
 
         self.player.draw(self.screen)
-        self.backpack.draw(self.screen, self.font)
+        self.backpack.draw(self.screen, self.font, VICTORY_SCORE)
 
         target = self.nearest_interactable()
         if isinstance(target, Item):
@@ -308,6 +353,21 @@ class Game:
         if self.interaction_message:
             message = self.font.render(self.interaction_message, True, (255, 214, 102))
             self.screen.blit(message, (40, 555))
+
+        if self.game_state != "playing":
+            color = (80, 220, 140) if self.game_state == "won" else (245, 110, 100)
+            title_text = "VITÓRIA" if self.game_state == "won" else "DERROTA"
+            title = self.big_font.render(title_text, True, color)
+            score = self.font.render(
+                f"Pontuação final: {self.backpack.total_value}/{VICTORY_SCORE} pts",
+                True,
+                (245, 245, 245),
+            )
+            panel = pygame.Rect(SCREEN_WIDTH // 2 - 190, SCREEN_HEIGHT // 2 - 65, 380, 130)
+            pygame.draw.rect(self.screen, (22, 24, 31), panel, border_radius=10)
+            pygame.draw.rect(self.screen, color, panel, 2, border_radius=10)
+            self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20)))
+            self.screen.blit(score, score.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 22)))
 
         pygame.display.flip()
 

@@ -48,3 +48,7 @@ Os itens abaixo já estão definidos na base visual do jogo:
 ## A estrutura da mochila
 
 A mochila possui capacidade máxima de 7 kg e uma barra visual para indicar o peso atual carregado. Como os itens disponíveis somam 13,4 kg, o jogador precisa priorizar o que coletar.
+
+## Pontuação e objetivo
+
+Cada item coletado acrescenta seus pontos à pontuação. A mochila mostra o progresso até a meta de 100 pontos; atingir a meta representa vitória. O jogador perde quando, considerando os itens restantes e o espaço livre na mochila, não existe mais uma combinação capaz de alcançar 100 pontos.
