@@ -38,6 +38,42 @@ class Item:
         meta = font.render(f"{self.total_available}x / {self.weight}kg / {self.value}p", True, (220, 220, 220))
         surface.blit(meta, (self.x - 45, self.y + 18))
 
+    def collides_with(self, player):
+        distance_squared = (self.x - player.x) ** 2 + (self.y - player.y) ** 2
+        collision_distance = self.radius + player.radius
+        return not self.collected and distance_squared <= collision_distance ** 2
+
+
+class Door:
+    def __init__(self, x: int, y: int, width: int = 34, height: int = 90):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.open = False
+
+    def collides_with(self, player):
+        player_rect = pygame.Rect(
+            player.x - player.radius,
+            player.y - player.radius,
+            player.radius * 2,
+            player.radius * 2,
+        )
+        return not self.open and self.rect.colliderect(player_rect)
+
+    def is_near(self, player):
+        closest_x = max(self.rect.left, min(player.x, self.rect.right))
+        closest_y = max(self.rect.top, min(player.y, self.rect.bottom))
+        distance_squared = (player.x - closest_x) ** 2 + (player.y - closest_y) ** 2
+        return distance_squared <= (player.radius + 22) ** 2
+
+    def interact(self, player, backpack):
+        self.open = not self.open
+
+    def draw(self, surface, font):
+        color = (90, 190, 130) if self.open else (180, 105, 65)
+        pygame.draw.rect(surface, color, self.rect, border_radius=5)
+        pygame.draw.rect(surface, (235, 225, 205), self.rect, 2, border_radius=5)
+        label = font.render("ABERTA" if self.open else "FECHADA", True, (245, 245, 245))
+        surface.blit(label, (self.rect.x - 16, self.rect.bottom + 5))
+
 
 class Player:
     def __init__(self, x: float, y: float):
@@ -46,7 +82,7 @@ class Player:
         self.radius = 18
         self.speed = PLAYER_SPEED
 
-    def update(self, dt, keys):
+    def update(self, dt, keys, obstacles=()):
         dx = 0
         dy = 0
 
@@ -61,11 +97,34 @@ class Player:
 
         if dx != 0 or dy != 0:
             length = (dx * dx + dy * dy) ** 0.5
-            self.x += (dx / length) * self.speed * dt
-            self.y += (dy / length) * self.speed * dt
+            move_x = (dx / length) * self.speed * dt
+            move_y = (dy / length) * self.speed * dt
+
+            self.x += move_x
+            if self.collides_with_any(obstacles):
+                self.x -= move_x
+
+            self.y += move_y
+            if self.collides_with_any(obstacles):
+                self.y -= move_y
 
         self.x = max(50, min(self.x, ROOM_WIDTH - 50))
         self.y = max(80, min(self.y, ROOM_HEIGHT - 30))
+
+    def collides_with_any(self, obstacles):
+        player_rect = pygame.Rect(
+            self.x - self.radius,
+            self.y - self.radius,
+            self.radius * 2,
+            self.radius * 2,
+        )
+        for obstacle in obstacles:
+            if hasattr(obstacle, "collides_with"):
+                if obstacle.collides_with(self):
+                    return True
+            elif player_rect.colliderect(obstacle):
+                return True
+        return False
 
     def draw(self, surface):
         pygame.draw.circle(surface, (90, 180, 255), (int(self.x), int(self.y)), self.radius)
@@ -83,10 +142,13 @@ class BackpackUI:
         self.total_value = 0
         self.collected_items: list[str] = []
 
-    def add_item(self, item: Item):
+    def add_item(self, item: Item) -> bool:
+        if self.current_weight + item.weight > self.capacity:
+            return False
         self.current_weight += item.weight
         self.total_value += item.value
         self.collected_items.append(item.name)
+        return True
 
     def percent(self) -> float:
         if self.capacity <= 0:
@@ -141,28 +203,59 @@ class Game:
             Item(name="Pólvora", x=265, y=170, weight=2.0, value=32, total_available=6, color=(255, 180, 80)),
             Item(name="Combustível", x=500, y=140, weight=3.2, value=45, total_available=5, color=(190, 120, 240)),
             Item(name="Soro Curativo", x=360, y=260, weight=1.5, value=18, total_available=8, color=(80, 200, 130)),
-            Item(name="Pólvora", x=660, y=240, weight=2.0, value=32, total_available=6, color=(255, 180, 80)),
+            Item(name="Pólvora", x=700, y=280, weight=2.0, value=32, total_available=6, color=(255, 180, 80)),
             Item(name="Combustível", x=210, y=330, weight=3.2, value=45, total_available=5, color=(190, 120, 240)),
         ]
+        self.doors = [Door(690, 360)]
+        self.obstacles = [
+            pygame.Rect(140, 80, 90, 180),
+            pygame.Rect(340, 90, 120, 160),
+            pygame.Rect(560, 95, 120, 170),
+        ]
+        self.interaction_message = ""
 
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_e:
+                self.interact()
         return True
+
+    def nearest_interactable(self):
+        nearby_items = [item for item in self.items if item.collides_with(self.player)]
+        nearby_doors = [door for door in self.doors if door.is_near(self.player)]
+        targets = nearby_items + nearby_doors
+        if not targets:
+            return None
+        return min(
+            targets,
+            key=lambda target: (target.x - self.player.x) ** 2 + (target.y - self.player.y) ** 2
+            if isinstance(target, Item)
+            else (target.rect.centerx - self.player.x) ** 2 + (target.rect.centery - self.player.y) ** 2,
+        )
+
+    def interact(self):
+        target = self.nearest_interactable()
+        if target is None:
+            self.interaction_message = "Nada para interagir por perto."
+            return
+
+        if isinstance(target, Item):
+            if self.backpack.add_item(target):
+                target.collected = True
+                self.interaction_message = f"{target.name} coletado."
+            else:
+                self.interaction_message = "Mochila sem capacidade suficiente."
+            return
+
+        target.interact(self.player, self.backpack)
+        self.interaction_message = "Porta aberta." if target.open else "Porta fechada."
 
     def update(self, dt):
         keys = pygame.key.get_pressed()
-        self.player.update(dt, keys)
-
-        for item in self.items:
-            if item.collected:
-                continue
-
-            distance = ((item.x - self.player.x) ** 2 + (item.y - self.player.y) ** 2) ** 0.5
-            if distance < 25:
-                item.collected = True
-                self.backpack.add_item(item)
+        solid_obstacles = self.obstacles + self.doors
+        self.player.update(dt, keys, solid_obstacles)
 
     def draw_background(self):
         self.screen.fill((15, 17, 22))
@@ -174,9 +267,8 @@ class Game:
         for sx in range(60, ROOM_WIDTH, 120):
             pygame.draw.rect(self.screen, (58, 62, 74), (sx, 80, 60, 260), border_radius=12)
 
-        pygame.draw.rect(self.screen, (24, 31, 38), (140, 80, 90, 180), border_radius=10)
-        pygame.draw.rect(self.screen, (24, 31, 38), (340, 90, 120, 160), border_radius=10)
-        pygame.draw.rect(self.screen, (24, 31, 38), (560, 95, 120, 170), border_radius=10)
+        for obstacle in self.obstacles:
+            pygame.draw.rect(self.screen, (24, 31, 38), obstacle, border_radius=10)
 
         label = self.big_font.render("SALA DE LOOT / LABORATÓRIO", True, (255, 255, 255))
         self.screen.blit(label, (55, 18))
@@ -187,11 +279,24 @@ class Game:
         for item in self.items:
             item.draw(self.screen, self.font)
 
+        for door in self.doors:
+            door.draw(self.screen, self.font)
+
         self.player.draw(self.screen)
         self.backpack.draw(self.screen, self.font)
 
-        info = self.font.render("Use WASD ou setas para mover", True, (200, 200, 200))
+        target = self.nearest_interactable()
+        if isinstance(target, Item):
+            prompt = f"E: coletar {target.name}"
+        elif isinstance(target, Door):
+            prompt = "E: abrir porta" if not target.open else "E: fechar porta"
+        else:
+            prompt = "WASD/setas: mover | E: interagir"
+        info = self.font.render(prompt, True, (200, 200, 200))
         self.screen.blit(info, (40, 530))
+        if self.interaction_message:
+            message = self.font.render(self.interaction_message, True, (255, 214, 102))
+            self.screen.blit(message, (40, 555))
 
         pygame.display.flip()
 
