@@ -26,18 +26,20 @@ Projeto base de um jogo de ação/sobrevivência em laboratório, com ambiente d
    python game.py
    ```
 
+O jogo abre em tela cheia. Pressione `R` para reiniciar com novos pontos de spawn para os itens, ou `Esc` para sair.
+
 ## Itens do cenário
 
 Os itens abaixo já estão definidos na base visual do jogo:
 
 - Soro Curativo
   - Peso: 1.5 kg
-  - Valor: 18 pontos
+  - Valor: 24 pontos
   - Quantidade máxima disponível no cenário: 8
 
 - Pólvora
   - Peso: 2.0 kg
-  - Valor: 32 pontos
+  - Valor: 34 pontos
   - Quantidade máxima disponível no cenário: 6
 
 - Combustível
@@ -51,7 +53,9 @@ A mochila possui capacidade máxima de 7 kg e uma barra visual para indicar o pe
 
 ## Pontuação e objetivo
 
-Cada item coletado acrescenta seus pontos à pontuação. A mochila mostra o progresso até a meta de 100 pontos; atingir a meta representa vitória. O jogador perde quando, considerando os itens restantes e o espaço livre na mochila, não existe mais uma combinação capaz de alcançar 100 pontos.
+Cada item coletado acrescenta seus pontos à pontuação. A mochila mostra o progresso até a meta de 90 pontos; atingir a meta representa vitória. Há mais de uma estratégia viável: dois combustíveis pesam 6,4 kg e valem 90 pontos, enquanto combustível, pólvora e soro pesam 6,7 kg e valem 103 pontos. O jogador perde quando, considerando os itens restantes e o espaço livre na mochila, não existe mais uma combinação capaz de alcançar 90 pontos.
+
+Pressione `E` perto de um item para coletá-lo individualmente; se não houver espaço para a unidade inteira, apenas a fração que couber será adicionada. Pressione `F` perto de qualquer item para executar o algoritmo guloso da mochila fracionária, ordenar o saque pela razão valor/peso e preencher a capacidade de 7 kg. O inventário mostra as quantidades selecionadas e o valor total.
 
 A energia diminui enquanto o jogador se move e se recupera quando ele fica parado. Ao esgotá-la, a velocidade de movimento é reduzida. Itens com valor igual ou superior a 30 pontos recebem um contorno dourado; mensagens de interação aparecem temporariamente na tela.
 
