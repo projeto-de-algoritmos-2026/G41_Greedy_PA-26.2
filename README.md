@@ -52,3 +52,5 @@ A mochila possui capacidade máxima de 7 kg e uma barra visual para indicar o pe
 ## Pontuação e objetivo
 
 Cada item coletado acrescenta seus pontos à pontuação. A mochila mostra o progresso até a meta de 100 pontos; atingir a meta representa vitória. O jogador perde quando, considerando os itens restantes e o espaço livre na mochila, não existe mais uma combinação capaz de alcançar 100 pontos.
+
+A energia diminui enquanto o jogador se move e se recupera quando ele fica parado. Ao esgotá-la, a velocidade de movimento é reduzida. Itens com valor igual ou superior a 30 pontos recebem um contorno dourado; mensagens de interação aparecem temporariamente na tela.

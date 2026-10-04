@@ -12,6 +12,7 @@ ROOM_WIDTH = 760
 ROOM_HEIGHT = 480
 BACKPACK_CAPACITY = 7.0
 VICTORY_SCORE = 100
+MAX_ENERGY = 100.0
 PLAYER_SPEED = 220
 
 
@@ -27,17 +28,24 @@ class Item:
     radius: int = 14
     collected: bool = False
 
-    def draw(self, surface, font, goal_value: int = VICTORY_SCORE):
+    def draw(self, surface, font):
         if self.collected:
             return
 
-        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), self.radius)
-        pygame.draw.circle(surface, (255, 255, 255), (int(self.x), int(self.y)), self.radius, 2)
+        center = (int(self.x), int(self.y))
+        is_valuable = self.value >= 30
+        if is_valuable:
+            pygame.draw.circle(surface, (255, 205, 90), center, self.radius + 5, 2)
+        pygame.draw.circle(surface, self.color, center, self.radius)
+        outline_color = (255, 230, 160) if is_valuable else (255, 255, 255)
+        pygame.draw.circle(surface, outline_color, center, self.radius, 2)
 
-        label = font.render(self.name, True, (230, 230, 230))
+        label_color = (255, 214, 120) if is_valuable else (230, 230, 230)
+        label = font.render(self.name, True, label_color)
         surface.blit(label, (self.x - 26, self.y - 32))
 
-        meta = font.render(f"{self.total_available}x / {self.weight}kg / {self.value}p", True, (220, 220, 220))
+        meta_color = (255, 214, 120) if is_valuable else (220, 220, 220)
+        meta = font.render(f"{self.total_available}x / {self.weight}kg / {self.value}p", True, meta_color)
         surface.blit(meta, (self.x - 45, self.y + 18))
 
     def collides_with(self, player):
@@ -83,6 +91,8 @@ class Player:
         self.y = y
         self.radius = 18
         self.speed = PLAYER_SPEED
+        self.energy = MAX_ENERGY
+        self.max_energy = MAX_ENERGY
 
     def update(self, dt, keys, obstacles=()):
         dx = 0
@@ -97,10 +107,13 @@ class Player:
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
             dy += 1
 
-        if dx != 0 or dy != 0:
+        is_moving = dx != 0 or dy != 0
+        if is_moving:
+            self.energy = max(0.0, self.energy - 8 * dt)
             length = (dx * dx + dy * dy) ** 0.5
-            move_x = (dx / length) * self.speed * dt
-            move_y = (dy / length) * self.speed * dt
+            movement_speed = self.speed if self.energy > 0 else self.speed * 0.6
+            move_x = (dx / length) * movement_speed * dt
+            move_y = (dy / length) * movement_speed * dt
 
             self.x += move_x
             if self.collides_with_any(obstacles):
@@ -109,6 +122,8 @@ class Player:
             self.y += move_y
             if self.collides_with_any(obstacles):
                 self.y -= move_y
+        else:
+            self.energy = min(self.max_energy, self.energy + 18 * dt)
 
         self.x = max(50, min(self.x, ROOM_WIDTH - 50))
         self.y = max(80, min(self.y, ROOM_HEIGHT - 30))
@@ -162,46 +177,74 @@ class BackpackUI:
             return 0.0
         return min(self.current_weight / self.capacity, 1.0)
 
-    def draw(self, surface, font, goal_value: int = VICTORY_SCORE):
+    def draw(
+        self,
+        surface,
+        font,
+        goal_value: int = VICTORY_SCORE,
+        energy: float = MAX_ENERGY,
+        max_energy: float = MAX_ENERGY,
+    ):
         pygame.draw.rect(surface, (22, 24, 31), (self.x, self.y, self.width, self.height), border_radius=10)
         pygame.draw.rect(surface, (60, 60, 70), (self.x, self.y, self.width, self.height), 2, border_radius=10)
 
         bar_x = self.x + 18
-        bar_y = self.y + 35
         bar_w = self.width - 36
-        bar_h = 14
-
-        pygame.draw.rect(surface, (35, 42, 55), (bar_x, bar_y, bar_w, bar_h), border_radius=12)
-        fill = max(0.0, min(self.percent(), 1.0))
-        pygame.draw.rect(surface, (80, 220, 120), (bar_x, bar_y, bar_w * fill, bar_h), border_radius=12)
+        bar_h = 12
 
         title = font.render("MOCHILA", True, (255, 255, 255))
         surface.blit(title, (self.x + 18, self.y + 8))
 
-        info = font.render(f"Peso: {self.current_weight:.1f}/{self.capacity:.1f} kg", True, (235, 235, 235))
-        surface.blit(info, (self.x + 18, self.y + 52))
+        energy_percent = min(energy / max_energy, 1.0) if max_energy > 0 else 0.0
+        if energy_percent > 0.5:
+            energy_color = (80, 220, 120)
+        elif energy_percent > 0.2:
+            energy_color = (255, 190, 75)
+        else:
+            energy_color = (240, 90, 85)
+        energy_text = font.render(f"Energia: {energy:.0f}/{max_energy:.0f}", True, (235, 235, 235))
+        surface.blit(energy_text, (self.x + 18, self.y + 28))
+        pygame.draw.rect(surface, (35, 42, 55), (bar_x, self.y + 45, bar_w, bar_h), border_radius=8)
+        pygame.draw.rect(
+            surface,
+            energy_color,
+            (bar_x, self.y + 45, bar_w * energy_percent, bar_h),
+            border_radius=8,
+        )
 
-        score_bar_y = self.y + 74
+        weight_text = font.render(f"Peso: {self.current_weight:.1f}/{self.capacity:.1f} kg", True, (235, 235, 235))
+        surface.blit(weight_text, (self.x + 18, self.y + 62))
+        weight_bar_y = self.y + 79
+        pygame.draw.rect(surface, (35, 42, 55), (bar_x, weight_bar_y, bar_w, bar_h), border_radius=8)
+        weight_color = (240, 90, 85) if self.percent() >= 0.9 else (80, 220, 120)
+        pygame.draw.rect(
+            surface,
+            weight_color,
+            (bar_x, weight_bar_y, bar_w * self.percent(), bar_h),
+            border_radius=8,
+        )
+
+        score_bar_y = self.y + 96
         score_percent = min(self.total_value / goal_value, 1.0) if goal_value > 0 else 0.0
-        pygame.draw.rect(surface, (35, 42, 55), (bar_x, score_bar_y, bar_w, 12), border_radius=6)
+        pygame.draw.rect(surface, (35, 42, 55), (bar_x, score_bar_y, bar_w, bar_h), border_radius=6)
         pygame.draw.rect(
             surface,
             (255, 190, 75),
-            (bar_x, score_bar_y, bar_w * score_percent, 12),
+            (bar_x, score_bar_y, bar_w * score_percent, bar_h),
             border_radius=6,
         )
         score_text = font.render(f"Pontos: {self.total_value}/{goal_value} pts", True, (255, 214, 102))
-        surface.blit(score_text, (self.x + 18, self.y + 90))
+        surface.blit(score_text, (self.x + 18, self.y + 113))
 
         inventory_title = font.render("ITENS", True, (180, 220, 255))
-        surface.blit(inventory_title, (self.x + 18, self.y + 112))
+        surface.blit(inventory_title, (self.x + 18, self.y + 136))
         item_counts = Counter(item.name for item in self.inventory)
         inventory_rows = [f"{name} x{count}" for name, count in item_counts.items()]
         if not inventory_rows:
             inventory_rows = ["(vazio)"]
         for index, row in enumerate(inventory_rows):
             item_text = font.render(row, True, (220, 230, 240))
-            surface.blit(item_text, (self.x + 18, self.y + 130 + index * 16))
+            surface.blit(item_text, (self.x + 18, self.y + 153 + index * 15))
 
 
 class Game:
@@ -219,7 +262,7 @@ class Game:
         self.big_font = pygame.font.SysFont(None, 32)
 
         self.player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
-        self.backpack = BackpackUI(620, 450, 290, 190, BACKPACK_CAPACITY)
+        self.backpack = BackpackUI(620, 420, 290, 220, BACKPACK_CAPACITY)
         self.items = [
             Item(name="Soro Curativo", x=150, y=120, weight=1.5, value=18, total_available=8, color=(80, 200, 130)),
             Item(name="Pólvora", x=265, y=170, weight=2.0, value=32, total_available=6, color=(255, 180, 80)),
@@ -236,6 +279,12 @@ class Game:
         ]
         self.game_state = "playing"
         self.interaction_message = ""
+        self.message_timer = 0.0
+        self.low_energy_warning = False
+
+    def show_message(self, message: str, duration: float = 2.5):
+        self.interaction_message = message
+        self.message_timer = duration
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -264,20 +313,20 @@ class Game:
 
         target = self.nearest_interactable()
         if target is None:
-            self.interaction_message = "Nada para interagir por perto."
+            self.show_message("Nada para interagir por perto.")
             return
 
         if isinstance(target, Item):
             if self.backpack.add_item(target):
                 self.update_game_state()
                 if self.game_state == "playing":
-                    self.interaction_message = f"{target.name} coletado."
+                    self.show_message(f"{target.name} coletado.")
             else:
-                self.interaction_message = "Mochila sem capacidade suficiente."
+                self.show_message("Mochila sem capacidade suficiente.")
             return
 
         target.interact(self.player, self.backpack)
-        self.interaction_message = "Porta aberta." if target.open else "Porta fechada."
+        self.show_message("Porta aberta." if target.open else "Porta fechada.")
 
     def best_possible_score(self):
         remaining_capacity = self.backpack.capacity - self.backpack.current_weight
@@ -301,17 +350,23 @@ class Game:
     def update_game_state(self):
         if self.backpack.total_value >= VICTORY_SCORE:
             self.game_state = "won"
-            self.interaction_message = "Meta alcançada! Você venceu."
+            self.show_message("Meta alcançada! Você venceu.")
         elif self.best_possible_score() < VICTORY_SCORE:
             self.game_state = "lost"
-            self.interaction_message = "Não há combinações suficientes. Você perdeu."
+            self.show_message("Não há combinações suficientes. Você perdeu.")
 
     def update(self, dt):
+        self.message_timer = max(0.0, self.message_timer - dt)
         if self.game_state != "playing":
             return
         keys = pygame.key.get_pressed()
         solid_obstacles = self.obstacles + self.doors
         self.player.update(dt, keys, solid_obstacles)
+        if self.player.energy <= 20 and not self.low_energy_warning:
+            self.show_message("Energia baixa.")
+            self.low_energy_warning = True
+        elif self.player.energy >= 40:
+            self.low_energy_warning = False
 
     def draw_background(self):
         self.screen.fill((15, 17, 22))
@@ -339,18 +394,24 @@ class Game:
             door.draw(self.screen, self.font)
 
         self.player.draw(self.screen)
-        self.backpack.draw(self.screen, self.font, VICTORY_SCORE)
+        self.backpack.draw(
+            self.screen,
+            self.font,
+            VICTORY_SCORE,
+            self.player.energy,
+            self.player.max_energy,
+        )
 
         target = self.nearest_interactable()
         if isinstance(target, Item):
-            prompt = f"E: coletar {target.name}"
+            prompt = f"E: coletar {target.name} (+{target.value} pts)"
         elif isinstance(target, Door):
             prompt = "E: abrir porta" if not target.open else "E: fechar porta"
         else:
             prompt = "WASD/setas: mover | E: interagir"
         info = self.font.render(prompt, True, (200, 200, 200))
         self.screen.blit(info, (40, 530))
-        if self.interaction_message:
+        if self.message_timer > 0 and self.interaction_message:
             message = self.font.render(self.interaction_message, True, (255, 214, 102))
             self.screen.blit(message, (40, 555))
 
