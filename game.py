@@ -1,5 +1,8 @@
 import argparse
+import math
 import os
+import random
+import struct
 from collections import Counter
 from dataclasses import dataclass
 
@@ -14,6 +17,7 @@ BACKPACK_CAPACITY = 7.0
 VICTORY_SCORE = 100
 MAX_ENERGY = 100.0
 PLAYER_SPEED = 220
+SOUND_SAMPLE_RATE = 22050
 
 
 @dataclass
@@ -52,6 +56,83 @@ class Item:
         distance_squared = (self.x - player.x) ** 2 + (self.y - player.y) ** 2
         collision_distance = self.radius + player.radius
         return not self.collected and distance_squared <= collision_distance ** 2
+
+
+@dataclass
+class Particle:
+    x: float
+    y: float
+    velocity_x: float
+    velocity_y: float
+    color: tuple[int, int, int]
+    radius: int
+    lifetime: float
+    label: str = ""
+
+    def update(self, dt):
+        self.x += self.velocity_x * dt
+        self.y += self.velocity_y * dt
+        self.velocity_y += 70 * dt
+        self.lifetime -= dt
+
+    def draw(self, surface, font):
+        intensity = max(0.0, min(self.lifetime / 0.8, 1.0))
+        color = tuple(int(channel * intensity) for channel in self.color)
+        if self.label:
+            label = font.render(self.label, True, color)
+            surface.blit(label, (self.x, self.y))
+        elif self.lifetime > 0:
+            radius = max(1, int(self.radius * intensity))
+            pygame.draw.circle(surface, color, (int(self.x), int(self.y)), radius)
+
+
+class SoundEffects:
+    def __init__(self):
+        self.sounds = {}
+        try:
+            if pygame.mixer.get_init() is None:
+                pygame.mixer.init(frequency=SOUND_SAMPLE_RATE, size=-16, channels=1, buffer=512)
+            self.sounds = {
+                "collect": self._create_sound(((620, 0.07), (880, 0.12)), 0.18),
+                "move": self._create_footstep(),
+                "victory": self._create_sound(((523, 0.12), (659, 0.12), (784, 0.12), (1046, 0.28)), 0.2),
+                "defeat": self._create_sound(((420, 0.14), (320, 0.16), (220, 0.3)), 0.18),
+            }
+        except pygame.error:
+            self.sounds = {}
+
+    @staticmethod
+    def _create_sound(notes, volume):
+        samples = bytearray()
+        for frequency, duration in notes:
+            sample_count = int(SOUND_SAMPLE_RATE * duration)
+            attack_samples = max(1, int(SOUND_SAMPLE_RATE * 0.01))
+            release_samples = max(1, int(SOUND_SAMPLE_RATE * 0.04))
+            for index in range(sample_count):
+                envelope = min(1.0, index / attack_samples, (sample_count - index) / release_samples)
+                value = int(32767 * volume * envelope * math.sin(2 * math.pi * frequency * index / SOUND_SAMPLE_RATE))
+                samples.extend(struct.pack("<h", value))
+        return pygame.mixer.Sound(buffer=bytes(samples))
+
+    @staticmethod
+    def _create_footstep():
+        sample_count = int(SOUND_SAMPLE_RATE * 0.12)
+        samples = bytearray()
+        for index in range(sample_count):
+            progress = index / sample_count
+            envelope = (1.0 - progress) ** 2.5
+            time = index / SOUND_SAMPLE_RATE
+            low_thump = math.sin(2 * math.pi * 125 * time) * 0.55
+            shoe_tap = math.sin(2 * math.pi * 245 * time) * 0.2
+            surface_noise = random.uniform(-1.0, 1.0) * 0.2
+            value = int(32767 * 0.5 * envelope * (low_thump + shoe_tap + surface_noise))
+            samples.extend(struct.pack("<h", value))
+        return pygame.mixer.Sound(buffer=bytes(samples))
+
+    def play(self, name):
+        sound = self.sounds.get(name)
+        if sound is not None:
+            sound.play()
 
 
 class Door:
@@ -260,6 +341,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 22)
         self.big_font = pygame.font.SysFont(None, 32)
+        self.audio = SoundEffects()
 
         self.player = Player(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
         self.backpack = BackpackUI(620, 420, 290, 220, BACKPACK_CAPACITY)
@@ -281,10 +363,30 @@ class Game:
         self.interaction_message = ""
         self.message_timer = 0.0
         self.low_energy_warning = False
+        self.movement_sound_timer = 0.0
+        self.particles: list[Particle] = []
 
     def show_message(self, message: str, duration: float = 2.5):
         self.interaction_message = message
         self.message_timer = duration
+
+    def spawn_burst(self, x, y, color, count, label=""):
+        for _ in range(count):
+            angle = random.uniform(0, math.tau)
+            speed = random.uniform(35, 130)
+            self.particles.append(
+                Particle(
+                    x,
+                    y,
+                    math.cos(angle) * speed,
+                    math.sin(angle) * speed,
+                    color,
+                    random.randint(2, 5),
+                    random.uniform(0.35, 0.8),
+                )
+            )
+        if label:
+            self.particles.append(Particle(x, y - 8, 0, -34, (255, 235, 170), 0, 0.8, label))
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -318,6 +420,8 @@ class Game:
 
         if isinstance(target, Item):
             if self.backpack.add_item(target):
+                self.audio.play("collect")
+                self.spawn_burst(target.x, target.y, target.color, 14, f"+{target.value} pts")
                 self.update_game_state()
                 if self.game_state == "playing":
                     self.show_message(f"{target.name} coletado.")
@@ -351,17 +455,34 @@ class Game:
         if self.backpack.total_value >= VICTORY_SCORE:
             self.game_state = "won"
             self.show_message("Meta alcançada! Você venceu.")
+            self.audio.play("victory")
+            self.spawn_burst(SCREEN_WIDTH / 2, 190, (100, 235, 155), 42)
         elif self.best_possible_score() < VICTORY_SCORE:
             self.game_state = "lost"
             self.show_message("Não há combinações suficientes. Você perdeu.")
+            self.audio.play("defeat")
+            self.spawn_burst(SCREEN_WIDTH / 2, 190, (235, 90, 85), 30)
 
     def update(self, dt):
         self.message_timer = max(0.0, self.message_timer - dt)
+        for particle in self.particles:
+            particle.update(dt)
+        self.particles = [particle for particle in self.particles if particle.lifetime > 0]
         if self.game_state != "playing":
             return
         keys = pygame.key.get_pressed()
         solid_obstacles = self.obstacles + self.doors
+        previous_position = (self.player.x, self.player.y)
         self.player.update(dt, keys, solid_obstacles)
+        has_moved = previous_position != (self.player.x, self.player.y)
+        if has_moved:
+            self.movement_sound_timer -= dt
+            if self.movement_sound_timer <= 0:
+                self.audio.play("move")
+                self.movement_sound_timer = 0.32
+                self.spawn_burst(self.player.x, self.player.y + self.player.radius - 3, (150, 175, 195), 2)
+        else:
+            self.movement_sound_timer = 0.0
         if self.player.energy <= 20 and not self.low_energy_warning:
             self.show_message("Energia baixa.")
             self.low_energy_warning = True
@@ -394,6 +515,8 @@ class Game:
             door.draw(self.screen, self.font)
 
         self.player.draw(self.screen)
+        for particle in self.particles:
+            particle.draw(self.screen, self.font)
         self.backpack.draw(
             self.screen,
             self.font,
